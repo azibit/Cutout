@@ -53,6 +53,8 @@ parser.add_argument('--dataset_dir', default='Data', type=str,
                     help='The location of the dataset to be explored')
 parser.add_argument('--trials', default=5, type=int,
                     help='Number of times to run the complete experiment')
+parser.add_argument('--iterations', default=2, type=int,
+                    help='Number of times to run the complete experiment')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -123,93 +125,95 @@ for dataset in dataset_list:
     # 1. Location to save the output for the given dataset
     current_dataset_file = dataset.split("/")[-1] + '_.txt'
 
-    #2. Prepare the training and test data
-    train_dataset = datasets.ImageFolder(os.path.join(dataset, 'train'),
-                                          train_transform)
+    for iteration in range(args.iterations):
 
-    test_dataset = datasets.ImageFolder(os.path.join(dataset, 'test'),
-                                          test_transform)
-    num_classes = len(train_dataset.classes)
+        #2. Prepare the training and test data
+        train_dataset = datasets.ImageFolder(os.path.join(dataset, 'train'),
+                                              train_transform)
+
+        test_dataset = datasets.ImageFolder(os.path.join(dataset, 'test'),
+                                              test_transform)
+        num_classes = len(train_dataset.classes)
 
 
-    # Data Loader (Input Pipeline)
-    train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                                               batch_size=args.batch_size,
-                                               shuffle=True,
-                                               num_workers=2)
+        # Data Loader (Input Pipeline)
+        train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
+                                                   batch_size=args.batch_size,
+                                                   shuffle=True,
+                                                   num_workers=2)
 
-    test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
-                                              batch_size=args.batch_size,
-                                              shuffle=False,
-                                              num_workers=2)
+        test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
+                                                  batch_size=args.batch_size,
+                                                  shuffle=False,
+                                                  num_workers=2)
 
-    # Iterate over the trials
-    for trial in range(args.trials):
+        # Iterate over the trials
+        for trial in range(args.trials):
 
-        # Create new model for each trial
-        cnn = ResNet18(num_classes=num_classes)
+            # Create new model for each trial
+            cnn = ResNet18(num_classes=num_classes)
 
-        cnn = cnn.cuda()
-        criterion = nn.CrossEntropyLoss().cuda()
-        cnn_optimizer = torch.optim.SGD(cnn.parameters(), lr=args.learning_rate,
-                                        momentum=0.9, nesterov=True, weight_decay=5e-4)
+            cnn = cnn.cuda()
+            criterion = nn.CrossEntropyLoss().cuda()
+            cnn_optimizer = torch.optim.SGD(cnn.parameters(), lr=args.learning_rate,
+                                            momentum=0.9, nesterov=True, weight_decay=5e-4)
 
-        scheduler = MultiStepLR(cnn_optimizer, milestones=[60, 120, 160], gamma=0.2)
+            scheduler = MultiStepLR(cnn_optimizer, milestones=[60, 120, 160], gamma=0.2)
 
-        log_dir = 'logs/'
-        checkpoint_dir = 'checkpoints/'
+            log_dir = 'logs/'
+            checkpoint_dir = 'checkpoints/'
 
-        file_utils.create_dir(log_dir)
-        file_utils.create_dir(checkpoint_dir)
+            file_utils.create_dir(log_dir)
+            file_utils.create_dir(checkpoint_dir)
 
-        filename = log_dir + test_id + '.csv'
-        csv_logger = CSVLogger(args=args, fieldnames=['epoch', 'train_acc', 'test_acc'], filename=filename)
+            filename = log_dir + test_id + '.csv'
+            csv_logger = CSVLogger(args=args, fieldnames=['epoch', 'train_acc', 'test_acc'], filename=filename)
 
-        for epoch in range(args.epochs):
+            for epoch in range(args.epochs):
 
-            xentropy_loss_avg = 0.
-            correct = 0.
-            total = 0.
+                xentropy_loss_avg = 0.
+                correct = 0.
+                total = 0.
 
-            progress_bar = tqdm(train_loader)
-            for i, (images, labels) in enumerate(progress_bar):
-                progress_bar.set_description('Epoch ' + str(epoch))
+                progress_bar = tqdm(train_loader)
+                for i, (images, labels) in enumerate(progress_bar):
+                    progress_bar.set_description('Epoch ' + str(epoch))
 
-                images = images.cuda()
-                labels = labels.cuda()
+                    images = images.cuda()
+                    labels = labels.cuda()
 
-                cnn.zero_grad()
-                pred = cnn(images)
+                    cnn.zero_grad()
+                    pred = cnn(images)
 
-                xentropy_loss = criterion(pred, labels)
-                xentropy_loss.backward()
-                cnn_optimizer.step()
+                    xentropy_loss = criterion(pred, labels)
+                    xentropy_loss.backward()
+                    cnn_optimizer.step()
 
-                xentropy_loss_avg += xentropy_loss.item()
+                    xentropy_loss_avg += xentropy_loss.item()
 
-                # Calculate running average of accuracy
-                pred = torch.max(pred.data, 1)[1]
-                total += labels.size(0)
-                correct += (pred == labels.data).sum().item()
-                accuracy = correct / total
+                    # Calculate running average of accuracy
+                    pred = torch.max(pred.data, 1)[1]
+                    total += labels.size(0)
+                    correct += (pred == labels.data).sum().item()
+                    accuracy = correct / total
 
-                progress_bar.set_postfix(
-                    xentropy='%.3f' % (xentropy_loss_avg / (i + 1)),
-                    acc='%.3f' % accuracy)
+                    progress_bar.set_postfix(
+                        xentropy='%.3f' % (xentropy_loss_avg / (i + 1)),
+                        acc='%.3f' % accuracy)
 
-            test_acc = test(test_loader)
-            tqdm.write('test_acc: %.3f' % (test_acc))
+                test_acc = test(test_loader)
+                tqdm.write('test_acc: %.3f' % (test_acc))
 
-            # scheduler.step(epoch)  # Use this line for PyTorch <1.4
-            scheduler.step()     # Use this line for PyTorch >=1.4
+                # scheduler.step(epoch)  # Use this line for PyTorch <1.4
+                scheduler.step()     # Use this line for PyTorch >=1.4
 
-            row = {'epoch': str(epoch), 'train_acc': str(accuracy), 'test_acc': str(test_acc)}
-            csv_logger.writerow(row)
+                row = {'epoch': str(epoch), 'train_acc': str(accuracy), 'test_acc': str(test_acc)}
+                csv_logger.writerow(row)
 
-            if epoch + 1 == args.epochs:
-                with open(current_dataset_file, 'a') as f:
-                    print("Test result for experiment: ", trial, " for dataset ", dataset, file = f)
-                    print(make_prediction(cnn, test_dataset.classes, test_loader, 'save'), file = f)
+                if epoch + 1 == args.epochs:
+                    with open(current_dataset_file, 'a') as f:
+                        print("Test result for iteration", iteration, " experiment:", trial, "for dataset", dataset, file = f)
+                        print(make_prediction(cnn, test_dataset.classes, test_loader, 'save'), file = f)
 
-        torch.save(cnn.state_dict(), checkpoint_dir + test_id + '.pt')
-        csv_logger.close()
+            torch.save(cnn.state_dict(), checkpoint_dir + test_id + '.pt')
+            csv_logger.close()
