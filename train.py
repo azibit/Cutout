@@ -150,6 +150,8 @@ for dataset in dataset_list:
         # Iterate over the trials
         for trial in range(args.trials):
 
+            print("Test result for iteration", iteration, " experiment:", trial, "for dataset", dataset)
+
             # Create new model for each trial
             cnn = ResNet18(num_classes=num_classes)
 
